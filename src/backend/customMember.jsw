@@ -1,0 +1,51 @@
+import wixData from 'wix-data';
+import wixUsersBackend from 'wix-users-backend';
+
+const COLL = 'Import414';
+const DEFAULT_ROLE   = 'Mitglied';
+const DEFAULT_STATUS = 'PendingApproval';
+
+/* Profil­datensatz beim ersten Login */
+export async function ensureMemberData(user) {
+  if (!user?.id) return;
+
+  const exists = await wixData.query(COLL).eq('memberId', user.id).find();
+  if (exists.totalCount) return;
+
+  const email = (await wixUsersBackend.getUser(user.id)).loginEmail;
+
+  await wixData.insert(COLL, {
+    memberId:      user.id,
+    email,
+    role:          DEFAULT_ROLE,
+    status:        DEFAULT_STATUS,
+    nickname:      '',
+    firstName:     '',
+    lastName:      '',
+    company:       '',
+    specialization:'',
+    profilePicture:null
+  });
+}
+
+/* eigenes Profil holen */
+export async function getMyProfile() {
+  const u = wixUsersBackend.currentUser;
+  if (!u.loggedIn) return null;
+
+  return (await wixData.query(COLL).eq('memberId', u.id).find()).items[0] || null;
+}
+
+/* Profil speichern (editierbare Felder) */
+export async function updateMyProfile(data) {
+  const u = wixUsersBackend.currentUser;
+  if (!u.loggedIn) throw new Error('Not logged in');
+
+  const item = (await wixData.query(COLL).eq('memberId', u.id).find()).items[0];
+  if (!item) throw new Error('Profil nicht gefunden');
+
+  ['nickname','firstName','lastName','company','specialization','profilePicture']
+    .forEach(f => { if (f in data) item[f] = data[f]; });
+
+  return wixData.update(COLL, item);
+}

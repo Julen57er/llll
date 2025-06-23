@@ -1,0 +1,35 @@
+// backend/members/profile.jsw
+import wixData from 'wix-data';
+
+const COLL_PROFILE = 'Import414';
+const COLL_FOLLOWS = 'Follows';
+
+export async function getProfileBundle(profileId, viewerId = null) {
+  if (!profileId) throw new Error('NO_PROFILE_ID');
+  const prof = await wixData.get(COLL_PROFILE, profileId).catch(()=>null);
+  if (!prof) throw new Error('PROFILE_NOT_FOUND');
+
+  const [followerCnt, followingCnt, viewerFollows] = await Promise.all([
+    wixData.query(COLL_FOLLOWS).eq('targetId', profileId).count(),
+    wixData.query(COLL_FOLLOWS).eq('followerId', profileId).count(),
+    viewerId
+      ? wixData.query(COLL_FOLLOWS)
+          .eq('targetId', profileId)
+          .eq('followerId', viewerId)
+          .count().then(c=>c>0)
+      : false
+  ]);
+
+  return {
+    profileMain: {
+      nickname : prof.nickname,
+      firstName: prof.firstName,
+      lastName : prof.lastName,
+      memberId : prof.memberId
+    },
+    followerCount : followerCnt,
+    followingCount: followingCnt,
+    viewerFollows,
+    isOwner: viewerId && viewerId === prof.memberId
+  };
+}

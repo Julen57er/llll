@@ -1,0 +1,35 @@
+// backend/social/follow.jsw
+import wixData            from 'wix-data';
+import wixUsersBackend    from 'wix-users-backend';
+
+const COLL = 'Follows';
+
+export async function toggleFollow(targetMemberId) {
+  const viewer = wixUsersBackend.currentUser;
+  if (!viewer.loggedIn) throw new Error('NOT_LOGGED_IN');
+  const viewerId = viewer.id;
+  if (viewerId === targetMemberId) throw new Error('SELF_FOLLOW_FORBIDDEN');
+
+  const followKey = `${viewerId}_${targetMemberId}`;
+  const has = await wixData.get(COLL, followKey).catch(() => null);
+
+  let following;
+  if (has) {
+    await wixData.remove(COLL, followKey);
+    following = false;
+  } else {
+    await wixData.insert(COLL, {
+      _id       : followKey,
+      followerId: viewerId,
+      targetId  : targetMemberId
+    });
+    following = true;
+  }
+
+  const totalFollowers = await wixData
+        .query(COLL)
+        .eq('targetId', targetMemberId)
+        .count();
+
+  return { following, totalFollowers };
+}

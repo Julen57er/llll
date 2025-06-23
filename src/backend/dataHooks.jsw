@@ -1,0 +1,20 @@
+/*****  backend/dataHooks.jsw  *****/
+
+import wixData from 'wix-data';
+import { ensureMemberData } from 'backend/customMember.jsw';
+
+const COLL = 'Import414';    // ← Collection-ID geändert
+
+/* Login-Hook */
+export function wixUsers_onLogin(event) {
+  return ensureMemberData(event.user);
+}
+
+/* Duplikate verhindern */
+export async function Import414_beforeInsert(item) {   // Hook-Name = Collection-ID
+  const dupe = await wixData.query(COLL)
+    .eq('memberId', item.memberId)
+    .find();
+  if (dupe.totalCount) throw new Error('Datensatz existiert bereits.');
+  return item;
+}

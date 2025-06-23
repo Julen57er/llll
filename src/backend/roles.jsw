@@ -1,0 +1,80 @@
+/*****  backend/roles.jsw  ******************************************
+ *  Approve / Decline eines Members  +  Historie-Log
+ ********************************************************************/
+
+import wixData from 'wix-data';
+import { authorization, currentMember } from 'wix-members-backend';
+import { triggeredEmails } from 'wix-crm-backend';
+
+/* Collection-IDs */
+const COLL_MEMBER  = 'Import414';   // Member-Daten
+const COLL_HISTORY = 'Import284';   // Historien-Logs
+
+/* Optionale Trigger-Mail-ID */
+const EMAIL_USER = 'ACCOUNT_ACTIVATED_USER';
+
+/**
+ *  Freigabe oder Ablehnung
+ *  @param {string} memberId
+ *  @param {string} newRole
+ *  @param {string} newStatus
+ */
+export async function adminSetRole(memberId, newRole, newStatus) {
+
+  /* ---------- Admin-Check (für Live aktivieren!) ----------
+  const roles   = await currentMember.getRoles();
+  const isAdmin = roles.some(r =>
+    (r.slug ?? r.name ?? '').toLowerCase() === 'admin'
+  );
+  if (!isAdmin) throw new Error('Forbidden');
+  --------------------------------------------------------- */
+
+  /* 1 ─ Member-Datensatz aktualisieren */
+  const rec = (await wixData.query(COLL_MEMBER)
+                .eq('memberId', memberId).find()).items[0];
+  if (!rec) throw new Error('Member record not found');
+
+  rec.role   = newRole;
+  rec.status = newStatus;
+  await wixData.update(COLL_MEMBER, rec, { suppressAuth: true });
+
+  /* 2 ─ Website-Rolle zuweisen (falls vorhanden) */
+  try {
+    await authorization.assignRole(memberId, newRole);
+  } catch (_) {
+    // Rolle existiert evtl. (noch) nicht – einfach ignorieren
+  }
+
+  /* 3 ─ Optionale Mail an den User */
+  if (newStatus === 'Active') {
+    try {
+      await triggeredEmails.emailMember(
+        EMAIL_USER,
+        memberId,
+        { variables: { memberName: rec.firstName, role: newRole } }
+      );
+    } catch (_) {
+      // Template fehlt – kein Problem im Testbetrieb
+    }
+  }
+
+  /* 4 ─ Aktion in der Historie loggen */
+  try {
+    const admin = await currentMember.getMember();
+    await wixData.insert(COLL_HISTORY, {
+      timestamp : new Date(),
+      memberId  : memberId,
+      nickname  : rec.nickname,
+      email     : rec.email,
+      action    : newStatus === 'Active' ? 'Approved' : 'Declined',
+      role      : newRole,
+      adminId   : admin._id,
+      adminEmail: admin.loginEmail,
+      notes     : ''
+    }, { suppressAuth: true });
+  } catch (logErr) {
+    console.error('History-Log fehlgeschlagen:', logErr);
+  }
+
+  return { ok: true };
+}

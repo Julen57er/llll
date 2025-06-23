@@ -1,0 +1,95 @@
+/*****  backend/register.jsw  *****/
+import wixUsersBackend from 'wix-users-backend';
+import wixData from 'wix-data';
+
+const COLL_BASE = 'Import414';
+const COLL_DETAIL = 'ProfileDetails';
+const COLL_MAIN = 'MainProfile';
+const COLL_MEDIA = 'MediaAssets'; // Name deiner MediaAssets-Sammlung
+
+// URLs für die Standardbilder
+const DEFAULT_PROFILE_PICTURE_URL = "https://static.wixstatic.com/media/79fe6c_d0b6919fad8c47a3b134be108984bab8~mv2.jpg";
+const DEFAULT_BANNER_PICTURE_URL = "https://static.wixstatic.com/media/9ba858_abeafa1f40d84c9ab4bfb7bf046cae3d~mv2.png";
+
+// Deine bestehende slugify Funktion (bleibt unverändert)
+const slugify = s =>
+  (s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+export async function registerUser(p) {
+  try {
+    /* 1️⃣  echtes Wix-Konto anlegen */
+    const { user } = await wixUsersBackend.register(
+      p.email,
+      p.password,
+      {
+        suppressAuthEmail: true, // Optional: unterdrückt die Standard-Wix-Registrierungs-E-Mail
+        contactInfo: { firstName: p.firstName, lastName: p.lastName }
+      }
+    );
+
+    /* 2️⃣  Grunddatensatz Import414➜ _id jetzt vom System */
+    const base = await wixData.insert(COLL_BASE, {
+      email: p.email,
+      memberId: user.id, // Wix User ID (aus wixUsersBackend.register)
+      role: 'Mitglied',
+      status: 'PendingApproval', // Oder 'Active', je nach deinem Workflow
+      nickname: p.nickname,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      newsletter: p.newsletter
+      // company und specialization werden hier nicht direkt gespeichert, das ist ok, wenn es so gewollt ist
+    });
+
+    const profileId = base._id; // Die _id des neu erstellten Eintrags in Import414
+
+    /* 3️⃣  ProfileDetails mit korrektem memberRef */
+    await wixData.insert(COLL_DETAIL, {
+      memberRef: profileId, // Verweist auf _id aus Import414
+      specialization: p.specialization || '',
+      about: '', // Standardmäßig leer
+      tags: ''   // Standardmäßig leer
+    });
+
+    /* 4️⃣  MainProfile  */
+    await wixData.insert(COLL_MAIN, {
+      _id: profileId,       // Gleiche Primär-ID wie Import414 und ProfileDetails.memberRef
+      memberRef: profileId,   // Referenz auf sich selbst oder Import414 (konsistent halten)
+      memberId: user.id,      // Wix User ID hier ebenfalls hinterlegen
+      nickname: p.nickname,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      email: p.email,
+      slug: slugify(p.nickname)
+    });
+
+    /* 5️⃣  MediaAssets mit Standardbildern füllen */
+    await wixData.insert(COLL_MEDIA, {
+      memberRef: profileId,                 // Verweist auf _id aus Import414
+      profilePicture: DEFAULT_PROFILE_PICTURE_URL, // Dein Standard-Profilbild
+      bannerPicture: DEFAULT_BANNER_PICTURE_URL    // Dein Standard-Bannerbild
+      // Füge hier weitere Standardfelder für MediaAssets hinzu, falls nötig
+    }, { suppressAuth: true }); // suppressAuth kann hier nützlich sein
+
+    console.log(`Default MediaAssets für profileId ${profileId} (User: ${user.id}) erstellt.`);
+    return { success: true, userId: user.id, profileId: profileId }; // Gebe ggf. mehr Infos zurück
+
+  } catch (err) {
+    console.error('[registerUser] Fehler bei der Registrierung oder Datenerstellung:', err);
+    // Detailliertere Fehlermeldung zurückgeben, wenn möglich
+    let message = 'Registrierung fehlgeschlagen. Bitte versuche es später erneut.';
+    if (err.message) {
+        if (err.message.includes("already exists")) { // Versuch, spezifischere Fehler abzufangen
+            message = "Ein Benutzer mit dieser E-Mail-Adresse existiert bereits.";
+        } else if (err.message.includes("Invalid email")) {
+            message = "Die angegebene E-Mail-Adresse ist ungültig.";
+        } else {
+            message = err.message; // Generische Fehlermeldung aus dem System
+        }
+    }
+    return { success: false, message: message };
+  }
+}
